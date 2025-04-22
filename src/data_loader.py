@@ -1,51 +1,75 @@
 import pandas as pd
 import numpy as np
-import math
-class Learning: 
-    def __init__(self, file_path):
+
+class LogisticRegressionFromScratch:
+    def __init__(self, file_path, label_col, alpha=0.01, iterations=1000):
         self.df = pd.read_csv(file_path)
-        self.__clean_data()
-        self.df_copy=self.df.copy()
+        self.label_col = label_col
+        self.alpha = alpha
+        self.iterations = iterations
         self.discrete_data_ref = {}
-        self.__format_dat()
-        self.m= self.df.shape[0]
-        self.n= self.df.shape[1]
-        self.theta_m=np.zeros(self.n)
-        self.alpha=0.000001
+
+        self.__clean_data()
+        self.__format_data()
+        self.df = self.df.iloc[:-5000]
+        self.test_df = self.df.iloc[-5000:]
+        # Prepare features and labels
+        self.X = self.df.drop(columns=[self.label_col]).to_numpy()
+        self.testX = self.test_df.drop(columns=[self.label_col]).to_numpy()
+        self.y = self.df[self.label_col].to_numpy()
+        self.testy = self.test_df[self.label_col].to_numpy()
+        self.m = self.X.shape[0]
+        self.n = self.X.shape[1]
+
+        # Add bias term (column of 1s)
+        self.X = np.hstack((np.ones((self.m, 1)), self.X))  # shape: (m, n+1)
+        self.theta = np.zeros(self.n + 1)
+
         self.__run_gradient_descent()
+
     def __clean_data(self):
-        self.df.dropna
-    
-    def __format_dat(self):
+        self.df.dropna(inplace=True)
+
+    def __format_data(self):
         for col in self.df.columns:
-            if isinstance(self.df[col].head().iloc[0],float):
-              self.df[col] = self.df[col].apply(lambda x: (x - self.df[col].min())/(self.df[col].max() - self.df[col].min()) )
-            if isinstance(self.df[col].head().iloc[0],str): 
-              self.df[col], unique = pd.factorize(self.df[col])
-              self.discrete_data_ref[col] = dict(enumerate(unique))
-    def __sigmoid(self, theta, x):
-        x = np.insert(x, 0, 1)
-        z = np.dot(theta, x)
-        z = np.clip(z, -500, 500)
-        return 1/(1 + np.exp(-z))
-    def __gradient(self, param_index):
-        gradient = 0
-        for i in range(self.m):
-            gradient = gradient + (self.__sigmoid(self.theta_m, self.df.iloc[i].to_numpy()[:-1])- self.df.iloc[i, self.n-1]) * self.df.iloc[i, param_index]
-        return gradient                       
-           
-    def __param_computation(self):
-        for index, theta in enumerate(self.theta_m):
-            print(index)
-            self.theta_m[index]= self.theta_m[index] - self.alpha * self.__gradient(index)
+            if col == self.label_col:
+                continue
+            if np.issubdtype(self.df[col].dtype, np.number):
+                self.df[col] = (self.df[col] - self.df[col].min()) / (self.df[col].max() - self.df[col].min())
+            else:
+                self.df[col], unique = pd.factorize(self.df[col])
+                self.discrete_data_ref[col] = dict(enumerate(unique))
+
+    def __sigmoid(self, z):
+        z = np.clip(z, -500, 500)  # avoid overflow
+        return 1 / (1 + np.exp(-z))
+
     def __compute_cost(self):
-        cost = 0
-        for i in range(self.m):
-           cost = cost +  self.df.iloc[i, self.n-1] * math.log10(self.__sigmoid(self.theta_m,self.df.iloc[i].to_numpy()[:-1])) + (1 -self.df.iloc[i, self.n-1]) * math.log10(1 - self.__sigmoid(self.theta_m,self.df.iloc[i].to_numpy()[:-1])) 
-        cost = (-1 / self.m) * cost
+        predictions = self.__sigmoid(np.dot(self.X, self.theta))
+        # Avoid log(0) by clipping
+        predictions = np.clip(predictions, 1e-10, 1 - 1e-10)
+        cost = -np.mean(self.y * np.log(predictions) + (1 - self.y) * np.log(1 - predictions))
         return cost
+
+    def __gradient_step(self):
+        predictions = self.__sigmoid(np.dot(self.X, self.theta))
+        gradient = (1 / self.m) * np.dot(self.X.T, (predictions - self.y))
+        self.theta -= self.alpha * gradient
+
     def __run_gradient_descent(self):
-        for i in range(10):
-            print(self.__compute_cost())
-            self.__param_computation()
-            print(self.__compute_cost())
+        for i in range(self.iterations):
+            cost = self.__compute_cost()
+            if i % 100 == 0 or i == self.iterations - 1:
+                print(f"Iteration {i}, Cost: {cost:.6f}")
+            self.__gradient_step()
+
+    def predict_prob(self, X):
+        if isinstance(X, pd.DataFrame):
+            X = X.to_numpy()
+        X = np.hstack((np.ones((X.shape[0], 1)), X))
+        return self.__sigmoid(np.dot(X, self.theta))
+
+    def predict(self, X, threshold=0.5):
+        return (self.predict_prob(X) >= threshold).astype(int)
+
+
